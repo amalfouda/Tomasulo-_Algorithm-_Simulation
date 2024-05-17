@@ -36,10 +36,11 @@ struct Reservation_Station{
     int startExecCycle = 0;
     int endExecCycle = 0;
     int writeBackCycle = 0;
-    
+    int RS_index;
 };
 struct Register_State{
     std::string Qi;
+    int index;
 };
 class Memory{
 public:
@@ -130,6 +131,7 @@ public:
     }
     bool issue(const Instruction &inst, int cycles){
         bool issue=false;
+        int counter=0;
         if(inst.op=="ADD" ||inst.op=="ADDI"||inst.op=="MUL"||inst.op=="NAND"){
             const std::string& rs_name = op_to_RS[inst.op];
             for( auto &station : RS[rs_name]){
@@ -137,7 +139,7 @@ public:
                     station.busy = true;
                     station.op = inst.op;
                     station.issueCycle = cycles;
-
+                    station.RS_index=++counter;
                     if (!dest_register[inst.rs1].Qi.empty()) {
                         station.Qj = dest_register[inst.rs1].Qi;
                         station.Vj = 0;
@@ -155,6 +157,7 @@ public:
                     }
 
                     dest_register[inst.rd].Qi =rs_name;
+                    dest_register[inst.rd].index=station.RS_index;
                     issue = true;
                     break;
                 }
@@ -166,6 +169,7 @@ public:
                    if (!station.busy) {
                        station.issueCycle = cycles;
                        station.op = inst.op;
+                       station.RS_index=++counter;
                        if (!dest_register[inst.rs1].Qi.empty()) {
                            station.Qj = dest_register[inst.rs1].Qi;
                            station.Vj = 0;
@@ -176,6 +180,7 @@ public:
                        station.A = inst.imm;
                        station.busy = true;
                        dest_register[inst.rs1].Qi = rs_name;
+                       dest_register[inst.rs1].index=station.RS_index;
                        issue = true;
                        break;
                    }
@@ -185,6 +190,7 @@ public:
                for (auto &station : RS[rs_name]) {
                    if (!station.busy) {
                        station.busy = true;
+                       station.RS_index=++counter;
                        station.issueCycle = cycles;//Check if it is station or inst
                        station.op = inst.op;
                        if (!dest_register[inst.rs1].Qi.empty()) {
@@ -202,7 +208,8 @@ public:
                            station.Qk = "";
                        }
                        station.A = inst.imm; // Assuming rd holds the memory address
-                       dest_register[inst.rs2].Qi = rs_name; // Assuming rs2 holds the memory address
+                       dest_register[inst.rs2].Qi = rs_name;
+                       dest_register[inst.rs2].index=station.RS_index;
                        issue = true;
                        break;
                    }
@@ -236,16 +243,74 @@ public:
 
     }
     
+    int16_t FP_operation(const Instruction &inst){
+        int16_t result=0;
+        if(inst.op=="ADD" && inst.rd!=0)
+        {
+            result=reg[inst.rs1]+reg[inst.rs2];
+        }
+        else if(inst.op=="ADDI" && inst.rd!=0)
+        {
+            result=reg[inst.rs1]+inst.imm;
+        }else if(inst.op=="MUL" && inst.rd!=0)
+        {
+            result=reg[inst.rs1]*reg[inst.rs2];
+        }else if(inst.op=="NAND" && inst.rd!=0){
+            result=~(reg[inst.rs1]&reg[inst.rs2]);
+        }
+        return result;
+    }
+    void Update_Rs(std::string name, int16_t result)
+    {
+        for (auto& rs_entry : dest_register) {
+            if (rs_entry.index != 0 && rs_entry.Qi == name) {
+                reg[rs_entry.index] = result;
+                rs_entry.Qi = "";
+            }
+        }
+        // Pass the result to other reservation stations
+        for (auto& rs : RS) {
+            for (auto& station : rs.second) {
+                if (station.Qj == name) {
+                    station.Vj = result;
+                    station.Qj = "";
+                }
+                if (station.Qk == name) {
+                    station.Vk = result;
+                    station.Qk = "";
+                }
+            }
+        }
+    }
     
-//    void Write_back(const Instruction &inst, int cycles, Memory &mem)
-//    {
-//        const std::string& rs_name = op_to_RS[inst.op];
-//        for (auto &station : RS[rs_name]) {
-//               
-//              
-//
-//          }
-//    }
+    
+    void Write_back(const Instruction &inst, int cycles, Memory &mem)
+    {
+        bool CDP=true;//this means that cdp is free for writing
+        if(inst.op=="NAND"||inst.op=="ADD"||inst.op=="ADDI"||inst.op=="MUL"){
+            const std::string& rs_name = op_to_RS[inst.op];
+            for (auto &station : RS[rs_name]) {
+                if(CDP==1 && station.finished_exec==1){
+                    if(station.RS_index==dest_register[inst.rd].index){
+                        
+                        station.busy=0;
+                        
+                        int16_t res=FP_operation(inst);
+                        Update_Rs(rs_name, res);
+                    }
+                }
+                
+            }
+        }
+        
+        if(inst.op=="Load"){
+            
+            
+        }
+        if(inst.op=="Store"){
+            
+        }
+    }
     
     
 };
@@ -299,7 +364,7 @@ std::vector<Instruction> readInstructionsFromInput() {
             instr.rd = std::stoi(rd_str);
             instr.rs1 = std::stoi(rs_str);
             instr.imm = std::stoi(imm_str);
-        } else if(instr.op == "Store"){
+        } else if(instr.op == "Store"||instr.op=="BEQ"){
             std::string rs1_str, rs2_str, imm_str;
             if (!(iss >> rs1_str >>rs2_str >> imm_str)) {
                 std::cerr << "Error: Invalid input format" << std::endl;
@@ -383,7 +448,3 @@ int main() {
        
         return 0;
     }
-
-
-   
-
