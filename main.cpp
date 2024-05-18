@@ -26,12 +26,13 @@ struct Instruction{
 struct Reservation_Station{
     bool busy = false;
     bool finished_exec=false;
+    bool finished_wb;
     bool not_allowed=false;
     int16_t Vj, Vk,A;
     std::string Qj, Qk, op;
     int numOfCyclesRemaining = 0;//for execution
     Instruction inst;
-    
+    bool branch_issue=false;
     // Tracking cycles each stage
     int issueCycle = 0;
     int startExecCycle = 0;
@@ -70,7 +71,7 @@ public:
     };
     std::map<std::string, std::vector<Reservation_Station>> RS;
     std::vector<Register_State> dest_register;
-   // int cycles=0;
+    std::queue<int> store_load_index;
     int idx=0;
 
     Tomasulo_Algorithm() {
@@ -174,6 +175,7 @@ public:
                        station.issueCycle = cycles;
                        station.op = inst.op;
                        copy.inst_index= ++idx;
+                       store_load_index.push(copy.inst_index);//while execution i will execute store,load in order based on the index
                        if (!dest_register[inst.rs1].Qi.empty()) {
                            station.Qj = dest_register[inst.rs1].Qi;
                            station.Vj = 0;
@@ -196,9 +198,12 @@ public:
                    
                    if (!station.busy) {
                        station.busy = true;
-                       //copy.inst_index= ++idx;
+                       copy.inst_index= ++idx;
                        station.issueCycle = cycles;//Check if it is station or inst
                        station.op = inst.op;
+                       
+                       store_load_index.push(copy.inst_index);//for execution purpose
+                       
                        if (!dest_register[inst.rs1].Qi.empty()) {
                            station.Qj = dest_register[inst.rs1].Qi;
                            station.Vj = 0;
@@ -223,6 +228,42 @@ public:
                    }
                }
            }
+        else if(inst.op=="BEQ")
+        {
+            
+            const std::string& rs_name = op_to_RS[inst.op];
+            for (auto &station : RS[rs_name]) {
+                
+                if (!station.busy) {
+                    station.busy = true;
+                    
+                    copy.inst_index= ++idx;
+                    station.issueCycle = cycles;//Check if it is station or inst
+                    station.op = inst.op;
+                    if (!dest_register[inst.rs1].Qi.empty()) {
+                        station.Qj = dest_register[inst.rs1].Qi;
+                        station.Vj = 0;
+                    } else {
+                        station.Vj = reg[inst.rs1];
+                        station.Qj = "";
+                    }
+                    if (!dest_register[inst.rs2].Qi.empty()) {
+                        station.Qk = dest_register[inst.rs2].Qi;
+                        station.Vk = 0;
+                    } else {
+                        station.Vk = reg[inst.rs2];
+                        station.Qk = "";
+                    }
+                    station.A = inst.imm; // Assuming rd holds the memory address
+                    dest_register[inst.rs2].Qi = rs_name; //(check if nothing depend on store)
+                    dest_register[inst.rs2].index= copy.inst_index;
+                    issue = true;
+                    
+                    
+                    break;
+                }
+            }
+        }
         return issue;
     }
     
@@ -303,15 +344,25 @@ public:
                     if(station.RS_index==dest_register[inst.rd].index){
                         
                         station.busy=0;
+                        station.finished_wb=1;
                         station.writeBackCycle=cycles;
                         int16_t res=FP_operation(inst);
                         Update_Rs(rs_name, res);
                         CDP=0;
                     }
                 }
+                if (station.finished_wb) {
+                                    std::cout << "Instruction: " << inst.op << " (index " << inst.inst_index << ") "
+                                              << "Issue: " << station.issueCycle << ", "
+                                              << "Start Exec: " << station.startExecCycle << ", "
+                                              << "End Exec: " << station.endExecCycle << ", "
+                                              << "Write-back: " << station.writeBackCycle << std::endl;
+                                }
                 
             }
         }
+        
+                        
     }
         
 //        if(inst.op=="Load"){
@@ -404,7 +455,6 @@ void testExecuteFunction() {
     bool issued;
     std::vector<Instruction> instructions = readInstructionsFromInput();
     int currCycle = 1;
-    int co;
     for (const auto& inst : instructions) {
         issued = simulator.issue(inst, currCycle);
         if (issued) {
@@ -453,13 +503,41 @@ void testExecuteFunction() {
 //    }
 //}
 
-    
+void processCycles(Tomasulo_Algorithm &simulator, std::vector<Instruction> &instructions) {
+    Memory memory;
+    int cycle = 1;
+    int i = 0;
+    int counter = 1;
+    bool issue_flag = false;
 
+    while (counter <= instructions.size()) {
+        if (i >= instructions.size()) {
+            simulator.Execute(instructions[i - 1], cycle);
+            simulator.Write_back(instructions[i - 1], cycle, memory);
+            ++cycle;
+        } else {
+            issue_flag = simulator.issue(instructions[i], cycle);
+            simulator.Execute(instructions[i - 1], cycle);
+            simulator.Write_back(instructions[i - 1], cycle, memory);
+            ++cycle;
+            i = (issue_flag) ? i : i - 1;
+            ++i;
+        }
+        ++counter;
+    }
+    --cycle;
+    std::cout << "Total cycles: " << cycle << std::endl;
+}
 
 int main() {
-    
-    
-    testExecuteFunction() ;
-       
-        return 0;
-    }
+//    Tomasulo_Algorithm simulator;
+//    simulator.Initialize_Reservation_station(4, 1, 1, 1, 2, 2, 1);
+//    simulator.Initialize_numberOfCycles();
+//
+//    // Placeholder for reading instructions from input
+//    std::vector<Instruction> instructions = readInstructionsFromInput();
+//
+//    processCycles(simulator, instructions);
+    testExecuteFunction();
+    return 0;
+}
