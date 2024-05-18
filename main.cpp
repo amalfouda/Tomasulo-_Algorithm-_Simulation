@@ -10,7 +10,8 @@
 //Register file
 int16_t reg[8] = {0,1,2,3,4,5,6,7};
 std::map<int, int16_t> mem;
-int MAX_CYCLES=20;
+
+
 struct Instruction{
     std::string op;
     int16_t rs1;
@@ -70,7 +71,7 @@ public:
     std::map<std::string, std::vector<Reservation_Station>> RS;
     std::vector<Register_State> dest_register;
    // int cycles=0;
-    
+    int idx=0;
 
     Tomasulo_Algorithm() {
 
@@ -88,6 +89,7 @@ public:
         RS["ADD/ADDI"].resize(a);
         RS["NAND"].resize(n);
         RS["MUL"].resize(m);
+        
     }
 
     void Initialize_numberOfCycles() {
@@ -129,9 +131,9 @@ public:
         }
         
     }
-    bool issue(const Instruction &inst, int cycles){
+    bool issue( const Instruction &inst, int cycles){
         bool issue=false;
-        int counter=0;
+        Instruction copy=inst;
         if(inst.op=="ADD" ||inst.op=="ADDI"||inst.op=="MUL"||inst.op=="NAND"){
             const std::string& rs_name = op_to_RS[inst.op];
             for( auto &station : RS[rs_name]){
@@ -139,7 +141,8 @@ public:
                     station.busy = true;
                     station.op = inst.op;
                     station.issueCycle = cycles;
-                    station.RS_index=++counter;
+                    
+                    copy.inst_index= ++idx;
                     if (!dest_register[inst.rs1].Qi.empty()) {
                         station.Qj = dest_register[inst.rs1].Qi;
                         station.Vj = 0;
@@ -157,19 +160,20 @@ public:
                     }
 
                     dest_register[inst.rd].Qi =rs_name;
-                    dest_register[inst.rd].index=station.RS_index;
+                    dest_register[inst.rd].index=copy.inst_index;
                     issue = true;
+                    std::cout<<"Counter:"<<idx<<":Station_RS_index:"<<copy.inst_index<<":dest_register_index"<<dest_register[inst.rd].index<<std::endl;
                     break;
                 }
             }
         }
         else if (inst.op == "Load") {
-               const std::string& rs_name = op_to_RS["Load"];
+               const std::string& rs_name = op_to_RS[inst.op];
                for (auto &station : RS[rs_name]) {
                    if (!station.busy) {
                        station.issueCycle = cycles;
                        station.op = inst.op;
-                       station.RS_index=++counter;
+                       copy.inst_index= ++idx;
                        if (!dest_register[inst.rs1].Qi.empty()) {
                            station.Qj = dest_register[inst.rs1].Qi;
                            station.Vj = 0;
@@ -179,18 +183,20 @@ public:
                        }
                        station.A = inst.imm;
                        station.busy = true;
-                       dest_register[inst.rs1].Qi = rs_name;
-                       dest_register[inst.rs1].index=station.RS_index;
+                       dest_register[inst.rd].Qi = rs_name;//worked
+                       dest_register[inst.rd].index=copy.inst_index;
                        issue = true;
+                       std::cout<<"Counter:"<<idx<<":Station_RS_index:"<<copy.inst_index<<":dest_register_index"<<dest_register[inst.rd].index<<std::endl;
                        break;
                    }
                }
            } else if (inst.op == "Store") {
-               const std::string& rs_name = op_to_RS["Store"];
+               const std::string& rs_name = op_to_RS[inst.op];
                for (auto &station : RS[rs_name]) {
+                   
                    if (!station.busy) {
                        station.busy = true;
-                       station.RS_index=++counter;
+                       //copy.inst_index= ++idx;
                        station.issueCycle = cycles;//Check if it is station or inst
                        station.op = inst.op;
                        if (!dest_register[inst.rs1].Qi.empty()) {
@@ -208,9 +214,11 @@ public:
                            station.Qk = "";
                        }
                        station.A = inst.imm; // Assuming rd holds the memory address
-                       dest_register[inst.rs2].Qi = rs_name;
-                       dest_register[inst.rs2].index=station.RS_index;
+//                       dest_register[inst.rs2].Qi = rs_name; (check if nothing depend on store)
+//                       dest_register[inst.rs2].index=station.RS_index;
                        issue = true;
+                       
+                       
                        break;
                    }
                }
@@ -266,6 +274,7 @@ public:
             if (rs_entry.index != 0 && rs_entry.Qi == name) {
                 reg[rs_entry.index] = result;
                 rs_entry.Qi = "";
+                rs_entry.index=-1;
             }
         }
         // Pass the result to other reservation stations
@@ -294,23 +303,25 @@ public:
                     if(station.RS_index==dest_register[inst.rd].index){
                         
                         station.busy=0;
-                        
+                        station.writeBackCycle=cycles;
                         int16_t res=FP_operation(inst);
                         Update_Rs(rs_name, res);
+                        CDP=0;
                     }
                 }
                 
             }
         }
-        
-        if(inst.op=="Load"){
-            
-            
-        }
-        if(inst.op=="Store"){
-            
-        }
     }
+        
+//        if(inst.op=="Load"){
+//            
+//            
+//        }
+//        if(inst.op=="Store"){
+//            
+//        }
+ //   }
     
     
 };
@@ -386,57 +397,61 @@ std::vector<Instruction> readInstructionsFromInput() {
 }
 void testExecuteFunction() {
     Tomasulo_Algorithm simulator;
+    //cin
     simulator.Initialize_Reservation_station(4, 1, 1, 1, 2, 2, 1);
     simulator.Initialize_numberOfCycles(); // Initialize the cycles and any other required state
-
+    
     bool issued;
     std::vector<Instruction> instructions = readInstructionsFromInput();
     int currCycle = 1;
-
+    int co;
     for (const auto& inst : instructions) {
         issued = simulator.issue(inst, currCycle);
         if (issued) {
-//            std::cout << "Issued " << inst.op << std::endl;
-//            std::cout << "Reservation Stations State:\n";
-//            std::cout << "RS Type | Busy | Op | Vj | Vk | Qj | Qk | A | Issue Cycle\n";
+            std::cout << "Issued " << inst.op << std::endl;
+            std::cout << "Reservation Stations State:\n";
+            std::cout << "RS Type | Busy | Op | Vj | Vk | Qj | Qk | A| Index | Issue Cycle\n";
+            for (const auto& type : simulator.RS) {
+                for (const auto& station : type.second) {
+                    std::cout << std::setw(8) << type.first << " | "
+                    << station.busy << " | "
+                    << std::setw(3) << station.op << " | "
+                    << std::setw(2) << station.Vj << " | "
+                    << std::setw(2) << station.Vk << " | "
+                    << std::setw(2) << station.Qj << " | "
+                    << std::setw(2) << station.Qk << " | "
+                    << std::setw(3) << station.A << " | "
+        
+                    << station.issueCycle << '\n';
+                }
+            }
+            
+            // Execute instructions for the current cycle
+            //            for (const auto& type : simulator.RS) {
+            //                for (auto& station : type.second) {
+            //                    simulator.Execute(inst, currCycle);
+        }
+        currCycle++;
+    }
+}
+
+            // Print updated state after execution
+//            std::cout << "Reservation Stations State after execution:\n";
+//            std::cout << "RS Type | Busy | Op | Issue Cycle | Start Exec Cycle | End Exec Cycle\n";
 //            for (const auto& type : simulator.RS) {
 //                for (const auto& station : type.second) {
 //                    std::cout << std::setw(8) << type.first << " | "
 //                              << station.busy << " | "
 //                              << std::setw(3) << station.op << " | "
-//                              << std::setw(2) << station.Vj << " | "
-//                              << std::setw(2) << station.Vk << " | "
-//                              << std::setw(2) << station.Qj << " | "
-//                              << std::setw(2) << station.Qk << " | "
-//                              << std::setw(3) << station.A << " | "
-//                              << station.issueCycle << '\n';
+//                              << station.issueCycle << " | "
+//                              << station.startExecCycle << " | "
+//                              << station.endExecCycle << '\n';
 //                }
 //            }
-
-            // Execute instructions for the current cycle
-            for (const auto& type : simulator.RS) {
-                for (auto& station : type.second) {
-                    simulator.Execute(inst, currCycle);
-                }
-            }
-
-            // Print updated state after execution
-            std::cout << "Reservation Stations State after execution:\n";
-            std::cout << "RS Type | Busy | Op | Issue Cycle | Start Exec Cycle | End Exec Cycle\n";
-            for (const auto& type : simulator.RS) {
-                for (const auto& station : type.second) {
-                    std::cout << std::setw(8) << type.first << " | "
-                              << station.busy << " | "
-                              << std::setw(3) << station.op << " | "
-                              << station.issueCycle << " | "
-                              << station.startExecCycle << " | "
-                              << station.endExecCycle << '\n';
-                }
-            }
-        }
-        currCycle++;
-    }
-}
+//        }
+//        currCycle++;
+//    }
+//}
 
     
 
