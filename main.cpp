@@ -6,10 +6,14 @@
 #include <queue>
 #include <iomanip>
 #include <sstream>
+#include <unordered_map>
 
 //Register file
 int16_t reg[8] = {0,1,2,3,4,5,6,7};
 std::map<int, int16_t> mem;
+
+std::unordered_map<std::string, int>labelMap;
+int instructionIndex=1;
 
 
 struct Instruction{
@@ -19,7 +23,8 @@ struct Instruction{
     int16_t rd;
     int16_t imm;
     int inst_index;
-    
+    std::string inst_label;
+    int label_index;
 
 };
 
@@ -40,10 +45,14 @@ struct Reservation_Station{
     int writeBackCycle = 0;
     int RS_index;
 };
+
+
 struct Register_State{
     std::string Qi;
     int index;
 };
+
+
 class Memory{
 public:
     std::map<int,int16_t>data;
@@ -55,6 +64,8 @@ public:
             return data[address];
         }
 };
+
+
 class Tomasulo_Algorithm{
 public:
     
@@ -132,6 +143,7 @@ public:
         }
         
     }
+    
     bool issue( const Instruction &inst, int cycles){
         bool issue=false;
         Instruction copy=inst;
@@ -309,6 +321,8 @@ public:
         }
         return result;
     }
+    
+    
     void Update_Rs(std::string name, int16_t result)
     {
         for (auto& rs_entry : dest_register) {
@@ -332,7 +346,6 @@ public:
             }
         }
     }
-    
     
     void Write_back(const Instruction &inst, int cycles, Memory &mem)
     {
@@ -378,26 +391,44 @@ public:
 };
 
 //Read Instruction
+
+
 std::vector<Instruction> readInstructionsFromInput() {
     std::vector<Instruction> instructions;
     std::string line;
-    
+
     std::cout << "Enter instructions (one per line, press Enter after each line, enter -1 to finish):\n";
-    
+
     while (std::getline(std::cin, line)) {
         if (line == "-1") {
-            break;  // Stop taking instructions if the user enters -1
+            break;
         }
-        
+
         std::istringstream iss(line);
         Instruction instr;
+        std::string firstToken;
         
-        // Parse operation
-        if (!(iss >> instr.op)) {
+        if (!(iss >> firstToken)) {
             std::cerr << "Error: Invalid input format" << std::endl;
             continue;
         }
         
+        std::string label;
+
+        // Check if the first token is a label
+        if (firstToken.back() == ':') {
+           // instr.inst_label
+            label = firstToken.substr(0, firstToken.size() - 1); // Remove the colon
+            if (!(iss >> instr.op)) {
+                std::cerr << "Error: Invalid input format after label" << std::endl;
+                continue;
+            }
+            labelMap[label] = instructionIndex; // Map label to current index
+        } else {
+            label = "";
+            instr.op = firstToken;
+        }
+
         // Parse other fields based on operation type
         if (instr.op == "ADD" || instr.op == "MUL" || instr.op == "NAND") {
             std::string rs1_str, rs2_str, rd_str;
@@ -408,44 +439,61 @@ std::vector<Instruction> readInstructionsFromInput() {
             instr.rs1 = std::stoi(rs1_str);
             instr.rs2 = std::stoi(rs2_str);
             instr.rd = std::stoi(rd_str);
+            instr.imm = 0;  // Initialize imm to 0
         } else if (instr.op == "ADDI") {
             std::string rs1_str, imm_str, rd_str;
-            if (!(iss >> rs1_str >> rd_str  >> imm_str)) {
+            if (!(iss >> rs1_str >> rd_str >> imm_str)) {
                 std::cerr << "Error: Invalid input format" << std::endl;
                 continue;
             }
             instr.rs1 = std::stoi(rs1_str);
             instr.rd = std::stoi(rd_str);
             instr.imm = std::stoi(imm_str);
-        } else if (instr.op == "Load" ) {
-            std::string rd_str, rs_str, imm_str;
-            if (!(iss >> rd_str >>rs_str >> imm_str)) {
+            instr.rs2 = 0; // Initialize rs2 to 0
+        } else if (instr.op == "Load") {
+            std::string rt_str, rs_str, imm_str;
+            if (!(iss >> rt_str >> rs_str >> imm_str)) {
                 std::cerr << "Error: Invalid input format" << std::endl;
                 continue;
             }
-            instr.rd = std::stoi(rd_str);
+            instr.rd = std::stoi(rt_str);
             instr.rs1 = std::stoi(rs_str);
             instr.imm = std::stoi(imm_str);
-        } else if(instr.op == "Store"||instr.op=="BEQ"){
-            std::string rs1_str, rs2_str, imm_str;
-            if (!(iss >> rs1_str >>rs2_str >> imm_str)) {
+            instr.rs2 = 0; // Initialize rs2 to 0
+        } else if (instr.op == "Store") {
+            std::string rs_str, rt_str, imm_str;
+            if (!(iss >> rs_str >> rt_str >> imm_str)) {
                 std::cerr << "Error: Invalid input format" << std::endl;
                 continue;
             }
-            instr.rs1 = std::stoi(rs1_str);
-            instr.rs2 = std::stoi(rs2_str);
+            instr.rs1 = std::stoi(rs_str);
+            instr.rs2 = std::stoi(rt_str);
             instr.imm = std::stoi(imm_str);
-        }
-        else {
+            instr.rd = 0; // Initialize rd to 0
+        } else if(instr.op=="Call"){
+            std::string label;
+                        if (!(iss >> label)) {
+                            std::cerr << "Error: Invalid input format for CALL" << std::endl;
+                            continue;
+                        }
+                        instr.inst_label = label;
+            std::cout<<"Call _Label:"<<instr.inst_label<<std::endl;
+        }else {
             std::cerr << "Error: Unknown operation '" << instr.op << "'" << std::endl;
             continue;
         }
 
+        // Add the instruction to the list
         instructions.push_back(instr);
+        instructionIndex++;
     }
 
     return instructions;
 }
+
+
+
+
 void testExecuteFunction() {
     Tomasulo_Algorithm simulator;
     //cin
@@ -483,6 +531,10 @@ void testExecuteFunction() {
         }
         currCycle++;
     }
+    std::cout << "\nLabels:\n";
+        for (const auto& pair : labelMap) {
+            std::cout << pair.first << ": " << pair.second << "\n";
+        }
 }
 
             // Print updated state after execution
@@ -503,41 +555,9 @@ void testExecuteFunction() {
 //    }
 //}
 
-void processCycles(Tomasulo_Algorithm &simulator, std::vector<Instruction> &instructions) {
-    Memory memory;
-    int cycle = 1;
-    int i = 0;
-    int counter = 1;
-    bool issue_flag = false;
-
-    while (counter <= instructions.size()) {
-        if (i >= instructions.size()) {
-            simulator.Execute(instructions[i - 1], cycle);
-            simulator.Write_back(instructions[i - 1], cycle, memory);
-            ++cycle;
-        } else {
-            issue_flag = simulator.issue(instructions[i], cycle);
-            simulator.Execute(instructions[i - 1], cycle);
-            simulator.Write_back(instructions[i - 1], cycle, memory);
-            ++cycle;
-            i = (issue_flag) ? i : i - 1;
-            ++i;
-        }
-        ++counter;
-    }
-    --cycle;
-    std::cout << "Total cycles: " << cycle << std::endl;
-}
 
 int main() {
-//    Tomasulo_Algorithm simulator;
-//    simulator.Initialize_Reservation_station(4, 1, 1, 1, 2, 2, 1);
-//    simulator.Initialize_numberOfCycles();
-//
-//    // Placeholder for reading instructions from input
-//    std::vector<Instruction> instructions = readInstructionsFromInput();
-//
-//    processCycles(simulator, instructions);
+
     testExecuteFunction();
     return 0;
 }
